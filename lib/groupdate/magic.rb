@@ -30,9 +30,9 @@ module Groupdate
           case field
           when :day_of_week # Sunday = 0, Monday = 1, etc
             # use CONCAT for consistent return type (String)
-            ["DAYOFWEEK(CONVERT_TZ(DATE_SUB(#{column}, INTERVAL #{day_start} HOUR), '+00:00', ?)) - 1", time_zone]
+            ["DAYOFWEEK(CONVERT_TZ(DATE_ADD(DATE_SUB(#{column}, INTERVAL #{day_start} HOUR),INTERVAL '#{time_offset}' SECOND), '+00:00', ?)) - 1", time_zone]
           when :hour_of_day
-            ["(EXTRACT(HOUR from CONVERT_TZ(#{column}, '+00:00', ?)) + 24 - #{day_start}) % 24", time_zone]
+            ["(EXTRACT(HOUR from DATE_ADD(CONVERT_TZ(#{column}, '+00:00', ?),INTERVAL '#{time_offset}' SECOND)) + 24 - #{day_start}) % 24", time_zone]
           when :week
             ["CONVERT_TZ(DATE_FORMAT(CONVERT_TZ(DATE_SUB(#{column}, INTERVAL ((#{7 - week_start} + WEEKDAY(CONVERT_TZ(#{column}, '+00:00', ?) - INTERVAL #{day_start} HOUR)) % 7) DAY) - INTERVAL #{day_start} HOUR, '+00:00', ?), '%Y-%m-%d 00:00:00') + INTERVAL #{day_start} HOUR, ?, '+00:00')", time_zone, time_zone, time_zone]
           else
@@ -52,18 +52,18 @@ module Groupdate
                 "%Y-01-01 00:00:00"
               end
 
-            ["DATE_ADD(CONVERT_TZ(DATE_FORMAT(CONVERT_TZ(DATE_SUB(#{column}, INTERVAL #{day_start} HOUR), '+00:00', ?), '#{format}'), ?, '+00:00'), INTERVAL #{day_start} HOUR)", time_zone, time_zone]
+            ["DATE_ADD(CONVERT_TZ(DATE_FORMAT(CONVERT_TZ(DATE_ADD(DATE_SUB(#{column}, INTERVAL #{day_start} HOUR),INTERVAL #{time_offset} SECOND), '+00:00', ?), '#{format}'), ?, '+00:00'), INTERVAL #{day_start} HOUR)", time_zone, time_zone]
           end
         when "PostgreSQL", "PostGIS"
           case field
           when :day_of_week
-            ["EXTRACT(DOW from (#{column}::timestamptz AT TIME ZONE ? - INTERVAL '#{day_start} hour'))::integer", time_zone]
+            ["EXTRACT(DOW from (#{column}::timestamptz AT TIME ZONE ? - INTERVAL '#{day_start} hour' + INTERVAL '#{time_offset} second'))::integer", time_zone]
           when :hour_of_day
-            ["EXTRACT(HOUR from #{column}::timestamptz AT TIME ZONE ? - INTERVAL '#{day_start} hour')::integer", time_zone]
+            ["EXTRACT(HOUR from #{column}::timestamptz AT TIME ZONE ? - INTERVAL '#{day_start} hour' + INTERVAL '#{time_offset} second')::integer", time_zone]
           when :week # start on Sunday, not PostgreSQL default Monday
-            ["(DATE_TRUNC('#{field}', (#{column}::timestamptz - INTERVAL '#{week_start} day' - INTERVAL '#{day_start}' hour) AT TIME ZONE ?) + INTERVAL '#{week_start} day' + INTERVAL '#{day_start}' hour) AT TIME ZONE ?", time_zone, time_zone]
+            ["(DATE_TRUNC('#{field}', (#{column}::timestamptz - INTERVAL '#{week_start} day' - INTERVAL '#{day_start}' hour + INTERVAL '#{time_offset} second') AT TIME ZONE ?) + INTERVAL '#{week_start} day' + INTERVAL '#{day_start}' hour) AT TIME ZONE ?", time_zone, time_zone]
           else
-            ["(DATE_TRUNC('#{field}', (#{column}::timestamptz - INTERVAL '#{day_start} hour') AT TIME ZONE ?) + INTERVAL '#{day_start} hour') AT TIME ZONE ?", time_zone, time_zone]
+            ["(DATE_TRUNC('#{field}', (#{column}::timestamptz - INTERVAL '#{day_start} hour') AT TIME ZONE ?) + INTERVAL '#{day_start} hour' + INTERVAL '#{time_offset} second') AT TIME ZONE ?", time_zone, time_zone]
           end
         else
           raise "Connection adapter not supported: #{adapter_name}"
@@ -123,6 +123,14 @@ module Groupdate
     end
 
     protected
+    
+    # The number of seconds +/- to offset the time by.
+    # Will take anything that supports to_i function
+    # Offset is positive to turn 00:00:00 into 00:00:01
+    # Offset is negative to turn 00:30:00 into 00:29:59
+    def time_offset
+      @time_offset ||= (options[:time_offset] || Groupdate.time_offset).to_i
+    end
 
     def time_zone
       @time_zone ||= begin

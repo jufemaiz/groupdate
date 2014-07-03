@@ -7,9 +7,10 @@ module Groupdate
   FIELDS = [:second, :minute, :hour, :day, :week, :month, :year, :day_of_week, :hour_of_day]
   METHODS = FIELDS.map{|v| :"group_by_#{v}" }
 
-  mattr_accessor :week_start, :day_start, :time_zone
+  mattr_accessor :week_start, :day_start, :time_zone, :time_offset
   self.week_start = :sun
   self.day_start = 0
+  self.time_offset = 0
 end
 
 require "groupdate/enumerable"

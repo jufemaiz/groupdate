@@ -61,9 +61,9 @@ module Groupdate
           when :hour_of_day
             ["EXTRACT(HOUR from #{column}::timestamptz AT TIME ZONE ? - INTERVAL '#{day_start} hour' + INTERVAL '#{time_offset} second')::integer", time_zone]
           when :week # start on Sunday, not PostgreSQL default Monday
-            ["(DATE_TRUNC('#{field}', (#{column}::timestamptz - INTERVAL '#{week_start} day' - INTERVAL '#{day_start}' hour + INTERVAL '#{time_offset} second') AT TIME ZONE ?) + INTERVAL '#{week_start} day' + INTERVAL '#{day_start}' hour) AT TIME ZONE ?", time_zone, time_zone]
+            ["(DATE_TRUNC('#{field}', (#{column}::timestamptz - INTERVAL '#{week_start} day' - INTERVAL '#{day_start} hour' + INTERVAL '#{time_offset} second') AT TIME ZONE ?) + INTERVAL '#{week_start} day' + INTERVAL '#{day_start} hour' - INTERVAL '#{time_offset} second') AT TIME ZONE ?", time_zone, time_zone]
           else
-            ["(DATE_TRUNC('#{field}', (#{column}::timestamptz - INTERVAL '#{day_start} hour') AT TIME ZONE ?) + INTERVAL '#{day_start} hour' + INTERVAL '#{time_offset} second') AT TIME ZONE ?", time_zone, time_zone]
+            ["(DATE_TRUNC('#{field}', (#{column}::timestamptz - INTERVAL '#{day_start} hour' + INTERVAL '#{time_offset} second') AT TIME ZONE ?) + INTERVAL '#{day_start} hour' - INTERVAL '#{time_offset} second') AT TIME ZONE ?", time_zone, time_zone]
           end
         else
           raise "Connection adapter not supported: #{adapter_name}"

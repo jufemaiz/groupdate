@@ -1,10 +1,60 @@
+## 3.0.1 [unreleased]
+
+- Added support for Redshift
+
+## 3.0.0
+
+Breaking changes
+
+- `Date` objects are now returned for day, week, month, quarter, and year by default. Use `dates: false` for the previous behavior, or change this globally with `Groupdate.dates = false`.
+- Array and hash methods no longer return the entire series by default. Use `series: true` for the previous behavior.
+- The `series: false` option now returns the correct types and order, and plays nicely with other options.
+
+## 2.5.3
+
+- All tests green with `mysql` gem
+- Added support for decimal day start
+
+## 2.5.2
+
+- Added `dates` option to return dates for day, week, month, quarter, and year
+
+## 2.5.1
+
+- Added `group_by_quarter`
+- Added `default_value` option
+- Accept symbol for `format` option
+- Raise `ArgumentError` if no field specified
+- Added support for ActiveRecord 5 beta
+
+## 2.5.0
+
+- Added `group_by_period` method
+- Added `current` option
+- Raise `ArgumentError` if no block given to enumerable
+
+## 2.4.0
+
+- Added localization
+- Added `carry_forward` option
+- Added `series: false` option for arrays and hashes
+- Fixed issue w/ Brasilia Summer Time
+- Fixed issues w/ ActiveRecord 4.2
+
+## 2.3.0
+
+- Raise error when ActiveRecord::Base.default_timezone is not `:utc`
+- Added `day_of_month`
+- Added `month_of_year`
+- Do not quote column name
+
 ## 2.2.1
 
 - Fixed ActiveRecord 3 associations
 
 ## 2.2.0
 
-- Added support for Arrays and Hashes
+- Added support for arrays and hashes
 
 ## 2.1.1
 

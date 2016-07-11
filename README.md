@@ -7,46 +7,50 @@ The simplest way to group by:
 - hour of the day
 - and more (complete list below)
 
-:tada: Time zones supported!! **the best part**
+:tada: Time zones - including daylight saving time - supported!! **the best part**
 
 :cake: Get the entire series - **the other best part**
 
 Works with Rails 3.1+
 
-Supports PostgreSQL and MySQL, plus Arrays and Hashes
+Supports PostgreSQL, MySQL, and Redshift, plus arrays and hashes
 
-[![Build Status](https://travis-ci.org/ankane/groupdate.png)](https://travis-ci.org/ankane/groupdate)
+[![Build Status](https://travis-ci.org/ankane/groupdate.svg?branch=master)](https://travis-ci.org/ankane/groupdate)
 
 :cupid: Goes hand in hand with [Chartkick](http://ankane.github.io/chartkick/)
 
-## Get Started
+**Groupdate 3.0 was just released!** See [instructions for upgrading](#30). If you use Chartkick with Groupdate, we recommend Chartkick 2.0 and above.
 
-Group by day
+## Get Started
 
 ```ruby
 User.group_by_day(:created_at).count
 # {
-#   2013-04-16 00:00:00 UTC => 50,
-#   2013-04-17 00:00:00 UTC => 100,
-#   2013-04-18 00:00:00 UTC => 34
+#   Sat, 28 May 2016 => 50,
+#   Sun, 29 May 2016 => 100,
+#   Mon, 30 May 2016 => 34
 # }
 ```
 
 Results are returned in ascending order by default, so no need to sort.
 
-You can also group by:
+You can group by:
 
 - second
 - minute
 - hour
+- day
 - week
 - month
+- quarter
 - year
 
 and
 
 - hour_of_day
 - day_of_week (Sunday = 0, Monday = 1, etc)
+- day_of_month
+- month_of_year
 
 Use it anywhere you can use `group`.
 
@@ -63,13 +67,13 @@ or
 ```ruby
 User.group_by_week(:created_at, time_zone: "Pacific Time (US & Canada)").count
 # {
-#   2013-03-10 00:00:00 PST => 70,
-#   2013-03-17 00:00:00 PDT => 54,
-#   2013-03-24 00:00:00 PDT => 80
+#   Sun, 06 Mar 2016 => 70,
+#   Sun, 13 Mar 2016 => 54,
+#   Sun, 20 Mar 2016 => 80
 # }
 ```
 
-Time zone objects also work.
+Time zone objects also work. To see a list of available time zones in Rails, run `rake time:zones:all`.
 
 ### Week Start
 
@@ -113,6 +117,12 @@ To get the most recent time periods, use:
 User.group_by_week(:created_at, last: 8).count # last 8 weeks
 ```
 
+To exclude the current period, use:
+
+```ruby
+User.group_by_week(:created_at, last: 8, current: false).count
+```
+
 ### Order
 
 You can order in descending order with:
@@ -127,32 +137,77 @@ or
 User.group_by_day(:created_at).order("day desc").count
 ```
 
-### Pretty Keys
+### Keys
+
+Keys are returned as date or time objects for the start of the period.
 
 To get keys in a different format, use:
 
 ```ruby
-User.group_by_hour_of_day(:created_at, format: "%l %P").count.keys.first # 12 am
+User.group_by_month(:created_at, format: "%b %Y").count
+# {
+#   "Jan 2015" => 10
+#   "Feb 2015" => 12
+# }
 ```
 
-Takes a `String`, which is passed to [strftime](http://strfti.me/), or a `Proc`
+or
+
+```ruby
+User.group_by_hour_of_day(:created_at, format: "%-l %P").count
+# {
+#    "12 am" => 15,
+#    "1 am"  => 11
+#    ...
+# }
+```
+
+Takes a `String`, which is passed to [strftime](http://strfti.me/), or a `Symbol`, which is looked up by `I18n.localize` in `i18n` scope 'time.formats', or a `Proc`.  You can pass a locale with the `locale` option.
+
+### Series
+
+The entire series is returned by default. To exclude points without data, use:
+
+```ruby
+User.group_by_day(:created_at, series: false).count
+```
+
+Or change the default value with:
+
+```ruby
+User.group_by_day(:created_at, default_value: "missing").count
+```
+
+### Dynamic Grouping
+
+```ruby
+User.group_by_period(:day, :created_at).count
+```
+
+Limit groupings with the `permit` option.
+
+```ruby
+User.group_by_period(params[:period], :created_at, permit: %w[day week]).count
+```
+
+Raises an `ArgumentError` for unpermitted periods.
 
 ## Arrays and Hashes
 
 ```ruby
-users.group_by_day{|u| u.created_at } # or group_by_day(&:created_at)
+users.group_by_day { |u| u.created_at } # or group_by_day(&:created_at)
 ```
 
 Supports the same options as above
 
 ```ruby
-users.group_by_day(time_zone: time_zone){|u| u.created_at }
+users.group_by_day(time_zone: time_zone) { |u| u.created_at }
 ```
 
 Count
 
 ```ruby
-Hash[ users.group_by_day{|u| u.created_at }.map{|k, v| [k, v.size] } ]
+Hash[ users.group_by_day { |u| u.created_at }.map { |k, v| [k, v.size] } ]
 ```
 
 ## Installation
@@ -171,21 +226,21 @@ gem 'groupdate'
 mysql_tzinfo_to_sql /usr/share/zoneinfo | mysql -u root mysql
 ```
 
-#### For JRuby
+or copy and paste [these statements](https://gist.githubusercontent.com/ankane/1d6b0022173186accbf0/raw/time_zone_support.sql) into a SQL console.
 
-Use the master version of your JDBC adapter.  You will get incorrect results for versions before [this commit](https://github.com/jruby/activerecord-jdbc-adapter/commit/c1cdb7cec8d3f06fc54995e8d872d830bd0a4d91).
+## Upgrading
 
-```ruby
-# postgresql
-gem "activerecord-jdbcpostgresql-adapter", :github => "jruby/activerecord-jdbc-adapter"
+### 3.0
 
-# mysql
-gem "activerecord-jdbcmysql-adapter", :github => "jruby/activerecord-jdbc-adapter"
-```
+Groupdate 3.0 brings a number of improvements.  Here are a few to be aware of:
 
-## Upgrading to 2.0
+- `Date` objects are now returned for day, week, month, quarter, and year by default. Use `dates: false` for the previous behavior, or change this globally with `Groupdate.dates = false`.
+- Array and hash methods no longer return the entire series by default. Use `series: true` for the previous behavior.
+- The `series: false` option now returns the correct type and order, and plays nicely with other options.
 
-Groupdate 2.0 brings a number a great improvements.  Here are two things to be aware of:
+### 2.0
+
+Groupdate 2.0 brings a number of improvements.  Here are two things to be aware of:
 
 - the entire series is returned by default
 - `ActiveSupport::TimeWithZone` keys are now returned for every database adapter - adapters previously returned `Time` or `String` keys

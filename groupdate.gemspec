@@ -7,7 +7,7 @@ Gem::Specification.new do |spec|
   spec.name          = "groupdate"
   spec.version       = Groupdate::VERSION
   spec.authors       = ["Andrew Kane"]
-  spec.email         = ["acekane1@gmail.com"]
+  spec.email         = ["andrew@chartkick.com"]
   spec.description   = "The simplest way to group temporal data"
   spec.summary       = "The simplest way to group temporal data"
   spec.homepage      = "https://github.com/ankane/groupdate"
@@ -28,8 +28,10 @@ Gem::Specification.new do |spec|
   if RUBY_PLATFORM == "java"
     spec.add_development_dependency "activerecord-jdbcpostgresql-adapter"
     spec.add_development_dependency "activerecord-jdbcmysql-adapter"
+    spec.add_development_dependency "activerecord-jdbcsqlite3-adapter"
   else
     spec.add_development_dependency "pg"
     spec.add_development_dependency "mysql2", "~> 0.3.20"
+    spec.add_development_dependency "sqlite3"
   end
 end

@@ -1,6 +1,31 @@
-## 3.0.1 [unreleased]
+## 3.2.1 [unreleased]
+
+- Added `minute_of_hour`
+
+## 3.2.0
+
+- Added limited support for SQLite
+
+## 3.1.1
+
+- Fixed `current: false`
+- Fixed `last` with `group_by_quarter`
+- Raise `ArgumentError` when `last` option is not supported
+
+## 3.1.0
+
+- Better support for date columns with `time_zone: false`
+- Better date range handling for `range` option
+
+## 3.0.2
+
+- Fixed `group_by_period` with associations
+- Fixed `week_start` option for enumerables
+
+## 3.0.1
 
 - Added support for Redshift
+- Fix for infinite loop in certain cases for Rails 5
 
 ## 3.0.0
 

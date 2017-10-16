@@ -18,6 +18,18 @@ ActiveRecord::Base.time_zone_aware_attributes = true
 
 class User < ActiveRecord::Base
   has_many :posts
+
+  def self.groupdate_calculation_methods
+    [:custom_count, :undefined_calculation]
+  end
+
+  def self.custom_count
+    count
+  end
+
+  def self.unlisted_calculation
+    count
+  end
 end
 
 class Post < ActiveRecord::Base
@@ -93,6 +105,8 @@ module TestDatabase
   end
 
   def test_table_name
+    # This test is to ensure there's not an error when using the table
+    # name as part of the column name.
     assert_empty User.group_by_day("users.created_at").count
   end
 
@@ -192,7 +206,7 @@ module TestDatabase
     assert_raises(NoMethodError) { User.group_by_day(:created_at).no_such_method }
   end
 
-  def test_respond_to_where
+  def test_respond_to_order
     assert User.group_by_day(:created_at).respond_to?(:order)
   end
 
@@ -211,6 +225,26 @@ module TestDatabase
     assert_equal expected, User.group_by_year(:created_at, last: 3).count
   end
 
+  def test_last_date
+    Time.zone = pt
+    today = Date.today
+    create_user today.to_s
+    this_month = pt.parse(today.to_s).beginning_of_month
+    last_month = this_month - 1.month
+    expected = {
+      last_month.to_date => 0,
+      this_month.to_date => 1
+    }
+    assert_equal expected, call_method(:month, :created_on, last: 2)
+  ensure
+    Time.zone = nil
+  end
+
+  def test_last_hour_of_day
+    error = assert_raises(ArgumentError) { User.group_by_hour_of_day(:created_at, last: 3).count }
+    assert_equal "Cannot use last option with hour_of_day", error.message
+  end
+
   def test_current
     create_user "#{this_year - 3}-01-01"
     create_user "#{this_year - 1}-01-01"
@@ -219,6 +253,18 @@ module TestDatabase
       Date.parse("#{this_year - 1}-01-01") => 1
     }
     assert_equal expected, User.group_by_year(:created_at, last: 2, current: false).count
+  end
+
+  def test_quarter_and_last
+    today = Date.today
+    create_user today.to_s
+    this_quarter = today.to_time.beginning_of_quarter
+    last_quarter = this_quarter - 3.months
+    expected = {
+      last_quarter.to_date => 0,
+      this_quarter.to_date => 1
+    }
+    assert_equal expected, call_method(:quarter, :created_at, last: 2)
   end
 
   def test_format_locale
@@ -248,11 +294,13 @@ module TestDatabase
   # permit
 
   def test_permit
-    assert_raises(ArgumentError, "Unpermitted period") { User.group_by_period(:day, :created_at, permit: %w(week)).count }
+    error = assert_raises(ArgumentError) { User.group_by_period(:day, :created_at, permit: %w(week)).count }
+    assert_equal "Unpermitted period", error.message
   end
 
   def test_permit_bad_period
-    assert_raises(ArgumentError, "Unpermitted period") { User.group_by_period(:bad_period, :created_at).count }
+    error = assert_raises(ArgumentError) { User.group_by_period(:bad_period, :created_at).count }
+    assert_equal "Unpermitted period", error.message
   end
 
   def test_permit_symbol_symbols
@@ -293,11 +341,20 @@ module TestDatabase
     assert_equal expected, user.posts.group_by_day(:created_at).count
   end
 
+  def test_associations_period
+    user = create_user("2014-03-01")
+    user.posts.create!(created_at: "2014-04-01 00:00:00 UTC")
+    expected = {
+      Date.parse("2014-04-01") => 1
+    }
+    assert_equal expected, user.posts.group_by_period(:day, :created_at).count
+  end
+
   # activerecord default_timezone option
 
   def test_default_timezone_local
     User.default_timezone = :local
-    assert_raises(RuntimeError) { User.group_by_day(:created_at).count }
+    assert_raises(Groupdate::Error) { User.group_by_day(:created_at).count }
   ensure
     User.default_timezone = :utc
   end
@@ -312,7 +369,7 @@ module TestDatabase
       Date.parse("2014-10-19") => 1,
       Date.parse("2014-10-20") => 1
     }
-    assert_equal expected, User.group_by_day(:created_at, time_zone: "Brasilia").count
+    assert_equal expected, call_method(:day, :created_at, time_zone: "Brasilia")
   end
 
   # carry_forward option
@@ -324,16 +381,39 @@ module TestDatabase
     assert_equal 2, User.group_by_day(:created_at, carry_forward: true).count[Date.parse("2014-05-02")]
   end
 
-  # dates
-
-  def test_dates
-    create_user "2014-03-01 12:00:00 UTC"
-    assert_equal ({Date.parse("2014-03-01") => 1}), User.group_by_day(:created_at, dates: true).count
-  end
+  # no column
 
   def test_no_column
     assert_raises(ArgumentError) { User.group_by_day.first }
   end
+
+  # custom model calculation methods
+
+  def test_custom_model_calculation_method
+    create_user "2014-05-01"
+    create_user "2014-05-01"
+    create_user "2014-05-03"
+
+    expected = {
+      Date.parse("2014-05-01") => 2,
+      Date.parse("2014-05-02") => 0,
+      Date.parse("2014-05-03") => 1
+    }
+
+    assert_equal expected, User.group_by_day(:created_at).custom_count
+  end
+
+  def test_using_unlisted_calculation_method_returns_new_series_instance
+    assert_instance_of Groupdate::Series, User.group_by_day(:created_at).unlisted_calculation
+  end
+
+  def test_using_listed_but_undefined_custom_calculation_method_raises_error
+    assert_raises(NoMethodError) do
+      User.group_by_day(:created_at).undefined_calculation
+    end
+  end
+
+  private
 
   def call_method(method, field, options)
     User.group_by_period(method, field, options).count
@@ -378,7 +458,7 @@ module TestGroupdate
   # second
 
   def test_second_end_of_second
-    if enumerable_test? || (ActiveRecord::Base.connection.adapter_name == "Mysql2" && ActiveRecord::VERSION::STRING.starts_with?("4.2."))
+    if enumerable_test? || ActiveRecord::Base.connection.adapter_name == "Mysql2"
       skip # no millisecond precision
     else
       assert_result_time :second, "2013-05-03 00:00:00 UTC", "2013-05-03 00:00:00.999"
@@ -661,6 +741,16 @@ module TestGroupdate
     assert_result :hour_of_day, 0, "2013-01-01 10:00:00", true, day_start: 2
   end
 
+  # minute of hour
+
+  def test_minute_of_hour_end_of_hour
+    assert_result :minute_of_hour, 59, "2017-02-09 23:59:59"
+  end
+
+  def test_minute_of_hour_beginning_of_hour
+    assert_result :minute_of_hour, 0, "2017-02-09 00:00:00"
+  end
+
   # day of week
 
   def test_day_of_week_end_of_day
@@ -861,6 +951,15 @@ module TestGroupdate
     assert_equal expected, call_method(:hour_of_day, :created_at, {series: true})
   end
 
+  def test_zeros_minute_of_hour
+    create_user "2017-02-09 20:05:00 UTC"
+    expected = {}
+    60.times do |n|
+      expected[n] = n == 5 ? 1 : 0
+    end
+    assert_equal expected, call_method(:minute_of_hour, :created_at, {series: true})
+  end
+
   def test_zeros_day_of_month
     create_user "1978-12-18"
     expected = {}
@@ -962,17 +1061,32 @@ module TestGroupdate
 
   def test_format_hour_of_day_day_start
     create_user "2014-03-01"
-    assert_format :hour_of_day, "2 am", "%-l %P", day_start: 2
+    assert_format :hour_of_day, "12 am", "%-l %P", day_start: 2
+  end
+
+  def test_format_minute_of_hour
+    create_user "2017-02-09"
+    assert_format :minute_of_hour, "0", "%-M"
+  end
+
+  def test_format_minute_of_hour_day_start
+    create_user "2017-02-09"
+    assert_format :minute_of_hour, "0", "%-M", day_start: 2
   end
 
   def test_format_day_of_week
     create_user "2014-03-01"
-    assert_format :day_of_week, "Sun", "%a"
+    assert_format :day_of_week, "Sat", "%a"
+  end
+
+  def test_format_day_of_week_day_start
+    create_user "2014-03-01"
+    assert_format :day_of_week, "Fri", "%a", day_start: 2
   end
 
   def test_format_day_of_week_week_start
     create_user "2014-03-01"
-    assert_format :day_of_week, "Sun", "%a", week_start: :sat
+    assert_format :day_of_week, "Sat", "%a", week_start: :mon
   end
 
   def test_format_day_of_month
@@ -991,16 +1105,50 @@ module TestGroupdate
     expected = {
       Date.parse("2013-05-03") => 1
     }
-    assert_equal expected, result(:day, "2013-05-03", false, dates: true)
+    assert_equal expected, result(:day, "2013-05-03", false)
   end
 
   def test_date_column_with_time_zone
-    # TODO change for Groupdate 3.0
-    skip
+    expected = {
+      Date.parse("2013-05-02") => 1
+    }
+    assert_equal expected, result(:day, "2013-05-03", true)
+  end
+
+  def test_date_column_with_time_zone_false
+    Time.zone = pt
+    create_user "2013-05-03"
     expected = {
       Date.parse("2013-05-03") => 1
     }
-    assert_equal expected, result(:day, "2013-05-03", true, dates: true)
+    assert_equal expected, call_method(:day, :created_at, time_zone: false)
+  ensure
+    Time.zone = nil
+  end
+
+  # date range
+
+  def test_date_range
+    ENV["TZ"] = "Europe/Oslo"
+    expected = {
+      Date.parse("2013-05-01") => 0,
+      Date.parse("2013-05-02") => 0,
+      Date.parse("2013-05-03") => 0
+    }
+    assert_equal expected, call_method(:day, :created_at, series: true, range: Date.parse("2013-05-01")..Date.parse("2013-05-03"))
+  ensure
+    ENV["TZ"] = "UTC"
+  end
+
+  def test_date_range_exclude_end
+    ENV["TZ"] = "Europe/Oslo"
+    expected = {
+      Date.parse("2013-05-01") => 0,
+      Date.parse("2013-05-02") => 0
+    }
+    assert_equal expected, call_method(:day, :created_at, series: true, range: Date.parse("2013-05-01")...Date.parse("2013-05-03"))
+  ensure
+    ENV["TZ"] = "UTC"
   end
 
   # day start
@@ -1013,10 +1161,12 @@ module TestGroupdate
     assert_result_date :day, "2013-05-03", "2013-05-03 02:30:00", false, day_start: 2.5
   end
 
+  private
+
   # helpers
 
   def assert_format(method, expected, format, options = {})
-    assert_equal expected, call_method(method, :created_at, options.merge(format: format, series: true)).keys.first
+    assert_equal({expected => 1}, call_method(method, :created_at, options.merge(format: format, series: false)))
   end
 
   def assert_result_time(method, expected, time_str, time_zone = false, options = {})
@@ -1060,8 +1210,16 @@ module TestGroupdate
     assert_equal expected, call_method(method, :created_at, options.merge(series: true, time_zone: time_zone ? "Pacific Time (US & Canada)" : nil, range: Time.parse(range_start)..Time.parse(range_end)))
   end
 
+  def this_quarters_month
+    Time.now.beginning_of_quarter.month
+  end
+
   def this_year
-    Time.now.utc.year
+    Time.now.year
+  end
+
+  def this_month
+    Time.now.month
   end
 
   def utc

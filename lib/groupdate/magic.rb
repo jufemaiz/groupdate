@@ -8,9 +8,9 @@ module Groupdate
       @field = field
       @options = options
 
-      raise "Unrecognized time zone" unless time_zone
+      raise Groupdate::Error, "Unrecognized time zone" unless time_zone
 
-      raise "Unrecognized :week_start option" if field == :week && !week_start
+      raise Groupdate::Error, "Unrecognized :week_start option" if field == :week && !week_start
     end
 
     def group_by(enum, &_block)
@@ -20,7 +20,7 @@ module Groupdate
 
     def relation(column, relation)
       if relation.default_timezone == :local
-        raise "ActiveRecord::Base.default_timezone must be :utc to use Groupdate"
+        raise Groupdate::Error, "ActiveRecord::Base.default_timezone must be :utc to use Groupdate"
       end
 
       time_zone = self.time_zone.tzinfo.name
@@ -35,6 +35,8 @@ module Groupdate
             ["DAYOFWEEK(CONVERT_TZ(DATE_SUB(#{column}, INTERVAL #{day_start} second), '+00:00', ?)) - 1", time_zone]
           when :hour_of_day
             ["(EXTRACT(HOUR from CONVERT_TZ(#{column}, '+00:00', ?)) + 24 - #{day_start / 3600}) % 24", time_zone]
+          when :minute_of_hour
+            ["(EXTRACT(MINUTE from CONVERT_TZ(#{column}, '+00:00', ?)))", time_zone]
           when :day_of_month
             ["DAYOFMONTH(CONVERT_TZ(DATE_SUB(#{column}, INTERVAL #{day_start} second), '+00:00', ?))", time_zone]
           when :month_of_year
@@ -68,6 +70,8 @@ module Groupdate
             ["EXTRACT(DOW from #{column}::timestamptz AT TIME ZONE ? - INTERVAL '#{day_start} second')::integer", time_zone]
           when :hour_of_day
             ["EXTRACT(HOUR from #{column}::timestamptz AT TIME ZONE ? - INTERVAL '#{day_start} second')::integer", time_zone]
+          when :minute_of_hour
+            ["EXTRACT(MINUTE from #{column}::timestamptz AT TIME ZONE ? - INTERVAL '#{day_start} second')::integer", time_zone]
           when :day_of_month
             ["EXTRACT(DAY from #{column}::timestamptz AT TIME ZONE ? - INTERVAL '#{day_start} second')::integer", time_zone]
           when :month_of_year
@@ -77,12 +81,52 @@ module Groupdate
           else
             ["(DATE_TRUNC('#{field}', (#{column}::timestamptz - INTERVAL '#{day_start} second') AT TIME ZONE ?) + INTERVAL '#{day_start} second') AT TIME ZONE ?", time_zone, time_zone]
           end
+        when "SQLite"
+          raise Groupdate::Error, "Time zones not supported for SQLite" unless self.time_zone.utc_offset.zero?
+          raise Groupdate::Error, "day_start not supported for SQLite" unless day_start.zero?
+          raise Groupdate::Error, "week_start not supported for SQLite" unless week_start == 6
+
+          if field == :week
+            ["strftime('%%Y-%%m-%%d 00:00:00 UTC', #{column}, '-6 days', 'weekday 0')"]
+          else
+            format =
+              case field
+              when :hour_of_day
+                "%H"
+              when :minute_of_hour
+                "%M"
+              when :day_of_week
+                "%w"
+              when :day_of_month
+                "%d"
+              when :month_of_year
+                "%m"
+              when :second
+                "%Y-%m-%d %H:%M:%S UTC"
+              when :minute
+                "%Y-%m-%d %H:%M:00 UTC"
+              when :hour
+                "%Y-%m-%d %H:00:00 UTC"
+              when :day
+                "%Y-%m-%d 00:00:00 UTC"
+              when :month
+                "%Y-%m-01 00:00:00 UTC"
+              when :quarter
+                raise Groupdate::Error, "Quarter not supported for SQLite"
+              else # year
+                "%Y-01-01 00:00:00 UTC"
+              end
+
+            ["strftime('#{format.gsub(/%/, '%%')}', #{column})"]
+          end
         when "Redshift"
           case field
           when :day_of_week # Sunday = 0, Monday = 1, etc.
             ["EXTRACT(DOW from CONVERT_TIMEZONE(?, #{column}::timestamp) - INTERVAL '#{day_start} second')::integer", time_zone]
           when :hour_of_day
             ["EXTRACT(HOUR from CONVERT_TIMEZONE(?, #{column}::timestamp) - INTERVAL '#{day_start} second')::integer", time_zone]
+          when :minute_of_hour
+            ["EXTRACT(MINUTE from CONVERT_TIMEZONE(?, #{column}::timestamp) - INTERVAL '#{day_start} second')::integer", time_zone]
           when :day_of_month
             ["EXTRACT(DAY from CONVERT_TIMEZONE(?, #{column}::timestamp) - INTERVAL '#{day_start} second')::integer", time_zone]
           when :month_of_year
@@ -97,7 +141,7 @@ module Groupdate
             ["CONVERT_TIMEZONE(?, 'Etc/UTC', DATE_TRUNC(?, CONVERT_TIMEZONE(?, #{column}) - INTERVAL '#{day_start} second'))::timestamp + INTERVAL '#{day_start} second'", time_zone, field, time_zone]
           end
         else
-          raise "Connection adapter not supported: #{adapter_name}"
+          raise Groupdate::Error, "Connection adapter not supported: #{adapter_name}"
         end
 
       if adapter_name == "MySQL" && field == :week
@@ -137,28 +181,29 @@ module Groupdate
 
       cast_method =
         case field
-        when :day_of_week, :hour_of_day, :day_of_month, :month_of_year
+        when :day_of_week, :hour_of_day, :day_of_month, :month_of_year, :minute_of_hour
           lambda { |k| k.to_i }
         else
           utc = ActiveSupport::TimeZone["UTC"]
           lambda { |k| (k.is_a?(String) || !k.respond_to?(:to_time) ? utc.parse(k.to_s) : k.to_time).in_time_zone(time_zone) }
         end
 
-      count =
-        begin
-          Hash[relation.send(method, *args, &block).map { |k, v| [multiple_groups ? k[0...@group_index] + [cast_method.call(k[@group_index])] + k[(@group_index + 1)..-1] : cast_method.call(k), v] }]
-        rescue NoMethodError
-          raise "Be sure to install time zone support - https://github.com/ankane/groupdate#for-mysql"
-        end
+      result = relation.send(method, *args, &block)
+      missing_time_zone_support = multiple_groups ? (result.keys.first && result.keys.first[@group_index].nil?) : result.key?(nil)
+      if missing_time_zone_support
+        raise Groupdate::Error, "Be sure to install time zone support - https://github.com/ankane/groupdate#for-mysql"
+      end
+      result = Hash[result.map { |k, v| [multiple_groups ? k[0...@group_index] + [cast_method.call(k[@group_index])] + k[(@group_index + 1)..-1] : cast_method.call(k), v] }]
 
-      series(count, (options.key?(:default_value) ? options[:default_value] : 0), multiple_groups, reverse)
+      series(result, (options.key?(:default_value) ? options[:default_value] : 0), multiple_groups, reverse)
     end
 
     protected
 
     def time_zone
       @time_zone ||= begin
-        time_zone = options[:time_zone] || Groupdate.time_zone || Time.zone || "Etc/UTC"
+        time_zone = "Etc/UTC" if options[:time_zone] == false
+        time_zone ||= options[:time_zone] || Groupdate.time_zone || (Groupdate.time_zone == false && "Etc/UTC") || Time.zone || "Etc/UTC"
         time_zone.is_a?(ActiveSupport::TimeZone) ? time_zone : ActiveSupport::TimeZone[time_zone]
       end
     end
@@ -174,12 +219,34 @@ module Groupdate
     def time_range
       @time_range ||= begin
         time_range = options[:range]
-        if !time_range && options[:last]
-          step = 1.send(field) if 1.respond_to?(field)
+        if time_range.is_a?(Range) && time_range.first.is_a?(Date)
+          # convert range of dates to range of times
+          # use parsing instead of in_time_zone due to Rails < 4
+          last = time_zone.parse(time_range.last.to_s)
+          last += 1.day unless time_range.exclude_end?
+          time_range = Range.new(time_zone.parse(time_range.first.to_s), last, true)
+        elsif !time_range && options[:last]
+          if field == :quarter
+            step = 3.months
+          elsif 1.respond_to?(field)
+            step = 1.send(field)
+          else
+            raise ArgumentError, "Cannot use last option with #{field}"
+          end
           if step
             now = Time.now
-            now -= step if options[:current] == false
-            time_range = round_time(now - (options[:last].to_i - 1).send(field))..now
+            # loop instead of multiply to change start_at - see #151
+            start_at = now
+            (options[:last].to_i - 1).times do
+              start_at -= step
+            end
+
+            time_range =
+              if options[:current] == false
+                round_time(start_at - step)...round_time(now)
+              else
+                round_time(start_at)..now
+              end
           end
         end
         time_range
@@ -195,6 +262,8 @@ module Groupdate
           0..6
         when :hour_of_day
           0..23
+        when :minute_of_hour
+          0..59
         when :day_of_month
           1..31
         when :month_of_year
@@ -224,8 +293,14 @@ module Groupdate
               step = 1.send(field)
             end
 
-            while (next_step = round_time(series.last + step)) && time_range.cover?(next_step)
+            last_step = series.last
+            while (next_step = round_time(last_step + step)) && time_range.cover?(next_step)
+              if next_step == last_step
+                last_step += step
+                next
+              end
               series << next_step
+              last_step = next_step
             end
 
             series
@@ -260,6 +335,8 @@ module Groupdate
               case field
               when :hour_of_day
                 key = sunday + key.hours + day_start.seconds
+              when :minute_of_hour
+                key = sunday + key.minutes + day_start.seconds
               when :day_of_week
                 key = sunday + key.days
               when :day_of_month
@@ -313,14 +390,16 @@ module Groupdate
           time.beginning_of_year
         when :hour_of_day
           time.hour
+        when :minute_of_hour
+          time.min
         when :day_of_week
-          (7 - week_start + ((time.wday - 1) % 7) % 7)
+          time.wday
         when :day_of_month
           time.day
         when :month_of_year
           time.month
         else
-          raise "Invalid field"
+          raise Groupdate::Error, "Invalid field"
         end
 
       time.is_a?(Time) ? time + day_start.seconds : time

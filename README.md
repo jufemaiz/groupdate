@@ -11,15 +11,13 @@ The simplest way to group by:
 
 :cake: Get the entire series - **the other best part**
 
-Works with Rails 3.1+
-
 Supports PostgreSQL, MySQL, and Redshift, plus arrays and hashes
+
+Limited support for [SQLite](#for-sqlite)
 
 [![Build Status](https://travis-ci.org/ankane/groupdate.svg?branch=master)](https://travis-ci.org/ankane/groupdate)
 
 :cupid: Goes hand in hand with [Chartkick](http://ankane.github.io/chartkick/)
-
-**Groupdate 3.0 was just released!** See [instructions for upgrading](#30). If you use Chartkick with Groupdate, we recommend Chartkick 2.0 and above.
 
 ## Get Started
 
@@ -128,13 +126,7 @@ User.group_by_week(:created_at, last: 8, current: false).count
 You can order in descending order with:
 
 ```ruby
-User.group_by_day(:created_at).reverse_order.count
-```
-
-or
-
-```ruby
-User.group_by_day(:created_at).order("day desc").count
+User.group_by_day(:created_at, reverse: true).count
 ```
 
 ### Keys
@@ -192,6 +184,14 @@ User.group_by_period(params[:period], :created_at, permit: %w[day week]).count
 
 Raises an `ArgumentError` for unpermitted periods.
 
+### Date Columns
+
+If grouping on date columns which don’t need time zone conversion, use:
+
+```ruby
+User.group_by_week(:created_on, time_zone: false).count
+```
+
 ## Arrays and Hashes
 
 ```ruby
@@ -227,6 +227,28 @@ mysql_tzinfo_to_sql /usr/share/zoneinfo | mysql -u root mysql
 ```
 
 or copy and paste [these statements](https://gist.githubusercontent.com/ankane/1d6b0022173186accbf0/raw/time_zone_support.sql) into a SQL console.
+
+You can confirm it worked with:
+
+```sql
+SELECT CONVERT_TZ(NOW(), '+00:00', 'Etc/UTC');
+```
+
+It should return the time instead of `NULL`.
+
+#### For SQLite
+
+Groupdate has limited support for SQLite.
+
+- No time zone support
+- No `day_start` or `week_start` options
+- No `group_by_quarter` method
+
+If your application’s time zone is set to something other than `Etc/UTC` (the default), create an initializer with:
+
+```ruby
+Groupdate.time_zone = false
+```
 
 ## Upgrading
 

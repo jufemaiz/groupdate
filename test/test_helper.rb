@@ -10,7 +10,7 @@ Minitest::Test = Minitest::Unit::TestCase unless defined?(Minitest::Test)
 ENV["TZ"] = "UTC"
 
 # for debugging
-# ActiveRecord::Base.logger = Logger.new(STDOUT)
+ActiveRecord::Base.logger = ActiveSupport::Logger.new(STDOUT) if ENV["VERBOSE"]
 
 # rails does this in activerecord/lib/active_record/railtie.rb
 ActiveRecord::Base.default_timezone = :utc
@@ -19,15 +19,7 @@ ActiveRecord::Base.time_zone_aware_attributes = true
 class User < ActiveRecord::Base
   has_many :posts
 
-  def self.groupdate_calculation_methods
-    [:custom_count, :undefined_calculation]
-  end
-
   def self.custom_count
-    count
-  end
-
-  def self.unlisted_calculation
     count
   end
 end
@@ -84,24 +76,6 @@ module TestDatabase
       Date.parse("2013-05-01") => 0
     }
     assert_equal expected, User.where("id = 0").group_by_day(:created_at, range: Date.parse("2013-05-01")..Date.parse("2013-05-01 23:59:59 UTC")).count
-  end
-
-  def test_order_hour_of_day
-    assert_equal 23, User.group_by_hour_of_day(:created_at).order("hour_of_day desc").count.keys.first
-  end
-
-  def test_order_hour_of_day_case
-    assert_equal 23, User.group_by_hour_of_day(:created_at).order("hour_of_day DESC").count.keys.first
-  end
-
-  def test_order_hour_of_day_reverse
-    skip if ActiveRecord::VERSION::MAJOR == 5
-    assert_equal 23, User.group_by_hour_of_day(:created_at).reverse_order.count.keys.first
-  end
-
-  def test_order_hour_of_day_order_reverse
-    skip if ActiveRecord::VERSION::MAJOR == 5
-    assert_equal 0, User.group_by_hour_of_day(:created_at).order("hour_of_day desc").reverse_order.count.keys.first
   end
 
   def test_table_name
@@ -227,7 +201,7 @@ module TestDatabase
 
   def test_last_date
     Time.zone = pt
-    today = Date.today
+    today = Time.zone.now.to_date
     create_user today.to_s
     this_month = pt.parse(today.to_s).beginning_of_month
     last_month = this_month - 1.month
@@ -403,14 +377,29 @@ module TestDatabase
     assert_equal expected, User.group_by_day(:created_at).custom_count
   end
 
-  def test_using_unlisted_calculation_method_returns_new_series_instance
-    assert_instance_of Groupdate::Series, User.group_by_day(:created_at).unlisted_calculation
-  end
-
   def test_using_listed_but_undefined_custom_calculation_method_raises_error
     assert_raises(NoMethodError) do
       User.group_by_day(:created_at).undefined_calculation
     end
+  end
+
+  # unscope
+
+  def test_unscope
+    assert_equal User.all, User.group_by_day(:created_at).unscoped.all
+  end
+
+  # pluck
+
+  def test_pluck
+    create_user "2014-05-01"
+    assert_equal [0], User.group_by_hour_of_day(:created_at).pluck(0)
+  end
+
+  # test relation
+
+  def test_relation
+    assert User.group_by_day(:created_at).is_a?(ActiveRecord::Relation)
   end
 
   private
@@ -431,8 +420,7 @@ module TestDatabase
     # hack for Redshift adapter, which doesn't return id on creation...
     user = User.last if user.id.nil?
 
-    # hack for MySQL & Redshift adapters
-    user.update_attributes(created_at: nil, created_on: nil) if created_at.nil? && is_redshift?
+    user.update_columns(created_at: nil, created_on: nil) if created_at.nil?
 
     user
   end
@@ -787,6 +775,24 @@ module TestGroupdate
     assert_result :day_of_week, 3, "2013-01-02 10:00:00", true, day_start: 2
   end
 
+  # day of week week start monday
+
+  def test_day_of_week_end_of_day_week_start_mon
+    assert_result :day_of_week, 1, "2013-01-01 23:59:59", false, week_start: :mon
+  end
+
+  def test_day_of_week_start_of_day_week_start_mon
+    assert_result :day_of_week, 2, "2013-01-02 00:00:00", false, week_start: :mon
+  end
+
+  def test_day_of_week_end_of_week_with_time_zone_week_start_mon
+    assert_result :day_of_week, 1, "2013-01-02 07:59:59", true, week_start: :mon
+  end
+
+  def test_day_of_week_start_of_week_with_time_zone_week_start_mon
+    assert_result :day_of_week, 2, "2013-01-02 08:00:00", true, week_start: :mon
+  end
+
   # day of month
 
   def test_day_of_month_end_of_day
@@ -1087,6 +1093,10 @@ module TestGroupdate
   def test_format_day_of_week_week_start
     create_user "2014-03-01"
     assert_format :day_of_week, "Sat", "%a", week_start: :mon
+  end
+
+  def test_format_day_of_week_week_start
+    assert_equal "Mon", call_method(:day_of_week, :created_at, week_start: :mon, format: "%a", series: true).keys.first
   end
 
   def test_format_day_of_month

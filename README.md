@@ -11,13 +11,11 @@ The simplest way to group by:
 
 :cake: Get the entire series - **the other best part**
 
-Supports PostgreSQL, MySQL, and Redshift, plus arrays and hashes
+Supports PostgreSQL, MySQL, and Redshift, plus arrays and hashes (and limited support for [SQLite](#for-sqlite))
 
-Limited support for [SQLite](#for-sqlite)
+:cupid: Goes hand in hand with [Chartkick](https://www.chartkick.com)
 
 [![Build Status](https://travis-ci.org/ankane/groupdate.svg?branch=master)](https://travis-ci.org/ankane/groupdate)
-
-:cupid: Goes hand in hand with [Chartkick](http://ankane.github.io/chartkick/)
 
 ## Get Started
 
@@ -220,7 +218,7 @@ gem 'groupdate'
 
 #### For MySQL
 
-[Time zone support](http://dev.mysql.com/doc/refman/5.6/en/time-zone-support.html) must be installed on the server.
+[Time zone support](https://dev.mysql.com/doc/refman/5.7/en/time-zone-support.html) must be installed on the server.
 
 ```sh
 mysql_tzinfo_to_sql /usr/share/zoneinfo | mysql -u root mysql
@@ -252,6 +250,15 @@ Groupdate.time_zone = false
 
 ## Upgrading
 
+### 4.0
+
+Groupdate 4.0 brings a number of improvements.  Here are a few to be aware of:
+
+- `group_by` methods return an `ActiveRecord::Relation` instead of a `Groupdate::Series`
+- Invalid options now throw an `ArgumentError`
+- `week_start` now affects `day_of_week`
+- Custom calculation methods are supported by default
+
 ### 3.0
 
 Groupdate 3.0 brings a number of improvements.  Here are a few to be aware of:
@@ -271,7 +278,7 @@ Groupdate 2.0 brings a number of improvements.  Here are two things to be aware 
 
 View the [changelog](https://github.com/ankane/groupdate/blob/master/CHANGELOG.md)
 
-Groupdate follows [Semantic Versioning](http://semver.org/)
+Groupdate follows [Semantic Versioning](https://semver.org/)
 
 ## Contributing
 

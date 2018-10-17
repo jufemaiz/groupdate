@@ -1,6 +1,23 @@
-## 3.2.1 [unreleased]
+## 4.0.1
+
+- Fixed incorrect range with `last` option near time change
+
+## 4.0.0
+
+- Custom calculation methods are supported by default - `groupdate_calculation_methods` is no longer needed
+
+Breaking changes
+
+- Dropped support for Rails < 4.2
+- Invalid options now throw an `ArgumentError`
+- `group_by` methods return an `ActiveRecord::Relation` instead of a `Groupdate::Series`
+- `week_start` now affects `day_of_week`
+- Removed support for `reverse_order` (was never supported in Rails 5)
+
+## 3.2.1
 
 - Added `minute_of_hour`
+- Added support for `unscoped`
 
 ## 3.2.0
 
